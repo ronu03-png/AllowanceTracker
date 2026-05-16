@@ -1,0 +1,660 @@
+{% extends 'base.html' %} {% block content %}
+<div class="tracker-screen">
+  <div class="tracker-header">
+    <div>
+      <h2>Allowance Dashboard</h2>
+      <p>Track your daily spending, monitor your monthly allowance, and break down expenses by category.</p>
+    </div>
+    <div class="header-month">
+      <span class="month-pill">{{ current_month }}</span>
+    </div>
+  </div>
+
+  <div class="summary-grid">
+    <div class="summary-card summary-allowance">
+      <div class="summary-icon">💰</div>
+      <div class="summary-body">
+        <span>Total Allowance</span>
+        <strong>{{ data.allowance | currency }}</strong>
+      </div>
+    </div>
+    <div class="summary-card summary-spent">
+      <div class="summary-icon">📉</div>
+      <div class="summary-body">
+        <span>Total Spent</span>
+        <strong>{{ spent | currency }}</strong>
+      </div>
+    </div>
+    <div class="summary-card summary-remaining">
+      <div class="summary-icon">🪙</div>
+      <div class="summary-body">
+        <span>Remaining</span>
+        <strong>{{ remaining | currency }}</strong>
+      </div>
+    </div>
+    <div class="summary-card summary-month">
+      <div class="summary-icon">📅</div>
+      <div class="summary-body">
+        <span>{{ 'This Month' if is_current_month else month_display }}</span>
+        <strong>{{ monthly_total | currency }}</strong>
+      </div>
+    </div>
+    <div class="summary-card summary-streak">
+      <div class="summary-icon">🔥</div>
+      <div class="summary-body">
+        <span>Logging streak</span>
+        <strong>{{ streak }} {{ 'day' if streak == 1 else 'days' }}</strong>
+      </div>
+    </div>
+  </div>
+
+  {% set _pct = percent_used if percent_used <= 100 else 100 %}
+  {% if percent_used >= 100 %}{% set _bar_state = 'over' %}{% elif percent_used >= 80 %}{% set _bar_state = 'warn' %}{% else %}{% set _bar_state = 'ok' %}{% endif %}
+  <div class="card budget-status">
+    <div class="budget-row">
+      <div class="budget-text">
+        <span class="budget-label">Budget used</span>
+        <strong class="budget-percent budget-{{ _bar_state }}">{{ percent_used | round(0) | int }}%</strong>
+      </div>
+      <div class="budget-hint">
+        {% if remaining <= 0 %}
+          <span class="budget-warn">⚠ Over budget — go easy this month</span>
+        {% else %}
+          <span>You can still spend</span>
+          <strong>{{ daily_budget | currency }}/day</strong>
+          <span class="days-left">for {{ days_left }} more {{ 'day' if days_left == 1 else 'days' }}</span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="progress-track">
+      <div class="progress-fill progress-{{ _bar_state }}" style="width: {{ _pct }}%"></div>
+    </div>
+  </div>
+
+  <div class="card chart-card">
+    <nav class="month-switcher" aria-label="Change month">
+      <a class="ms-arrow" href="{{ url_for('dashboard', month=prev_month_key) }}" aria-label="Previous month">‹</a>
+      <div class="ms-current">
+        <strong>{{ month_display }}</strong>
+        {% if not is_current_month %}
+        <a class="ms-today" href="{{ url_for('dashboard') }}">Jump to today</a>
+        {% endif %}
+      </div>
+      {% if next_disabled %}
+      <span class="ms-arrow ms-disabled" aria-disabled="true" aria-label="Next month (disabled)">›</span>
+      {% else %}
+      <a class="ms-arrow" href="{{ url_for('dashboard', month=next_month_key) }}" aria-label="Next month">›</a>
+      {% endif %}
+    </nav>
+
+    <div class="chart-header">
+      <div>
+        <h3>Daily Spending Monitor</h3>
+        <p class="chart-subtitle">Tracking every day of {{ month_display }}</p>
+      </div>
+      <div class="chart-stats">
+        <span class="stat-label">Showing</span>
+        <strong id="filterTotalLabel">All categories</strong>
+        <span class="stat-amount" id="filterTotalAmount">{{ monthly_total | currency }}</span>
+      </div>
+    </div>
+
+    <div class="filter-bar" role="tablist" aria-label="Category filter">
+      <button type="button" class="filter-chip active" data-filter="All">All</button>
+      {% for cat in categories %}
+      <button type="button" class="filter-chip" data-filter="{{ cat }}">{{ cat }}</button>
+      {% endfor %}
+    </div>
+
+    <div class="chart-container">
+      <canvas id="monthlyChart"></canvas>
+    </div>
+
+    <div class="category-legend" id="categoryLegend">
+      {% for cat in categories %}
+      <div class="legend-item" data-category="{{ cat }}">
+        <span class="legend-dot" data-cat-dot="{{ cat }}"></span>
+        <span class="legend-name">{{ cat }}</span>
+        <span class="legend-amount">{{ category_totals.get(cat, 0) | currency }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if monthly_total > 0 %}
+  <div class="card pie-card">
+    <div class="chart-header">
+      <div>
+        <h3>Category Share — {{ month_display }}</h3>
+        <p class="chart-subtitle">Where your money went this month</p>
+      </div>
+      <div class="chart-stats">
+        <span class="stat-label">Month total</span>
+        <span class="stat-amount">{{ monthly_total | currency }}</span>
+      </div>
+    </div>
+    <div class="pie-container">
+      <canvas id="categoryPie"></canvas>
+    </div>
+    <script>
+      (function () {
+        const totals = {{ category_totals | tojson }};
+        const allCats = {{ categories | tojson }};
+        // Only include categories with > 0 spending in the pie
+        const labels = allCats.filter((c) => (totals[c] || 0) > 0);
+        const values = labels.map((c) => totals[c]);
+
+        const palette = {
+          Food: '#ef4444', Transport: '#3b82f6', Shopping: '#a855f7',
+          School: '#10b981', Other: '#f59e0b',
+        };
+        const fallback = ['#0ea5e9', '#14b8a6', '#f43f5e', '#8b5cf6', '#22c55e', '#eab308', '#06b6d4', '#84cc16'];
+        const colorFor = (cat, i) => palette[cat] || fallback[i % fallback.length];
+        const bg = labels.map((c, i) => colorFor(c, i));
+
+        function pieThemeColors() {
+          const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+          const styles = getComputedStyle(document.documentElement);
+          return {
+            text: (styles.getPropertyValue('--text-subtle').trim() || '#475569'),
+            border: (styles.getPropertyValue('--surface').trim() || '#fff'),
+            tooltipBg: isDark ? 'rgba(15, 23, 42, 0.96)' : 'rgba(15, 23, 42, 0.95)',
+          };
+        }
+
+        function pieOptions() {
+          const c = pieThemeColors();
+          return {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '60%',
+            plugins: {
+              legend: {
+                position: 'right',
+                labels: { color: c.text, padding: 14, font: { weight: '600' } },
+              },
+              tooltip: {
+                backgroundColor: c.tooltipBg,
+                titleColor: '#fff',
+                bodyColor: '#e2e8f0',
+                padding: 12,
+                cornerRadius: 10,
+                callbacks: {
+                  label: (item) => {
+                    const total = values.reduce((a, b) => a + b, 0) || 1;
+                    const pct = ((item.parsed / total) * 100).toFixed(1);
+                    return ` ${item.label}: ₱${item.parsed.toFixed(2)} (${pct}%)`;
+                  },
+                },
+              },
+            },
+          };
+        }
+
+        const pieCtx = document.getElementById('categoryPie').getContext('2d');
+        const pie = new Chart(pieCtx, {
+          type: 'doughnut',
+          data: {
+            labels: labels,
+            datasets: [{
+              data: values,
+              backgroundColor: bg,
+              borderColor: pieThemeColors().border,
+              borderWidth: 3,
+              hoverOffset: 8,
+            }],
+          },
+          options: pieOptions(),
+        });
+
+        window.addEventListener('themechange', () => {
+          pie.data.datasets[0].borderColor = pieThemeColors().border;
+          pie.options = pieOptions();
+          pie.update();
+        });
+      })();
+    </script>
+  </div>
+  {% endif %}
+
+  {% if user_categories %}
+  <div class="card budgets-card">
+    <div class="recommend-header">
+      <div>
+        <h3>Category Budgets</h3>
+        <p class="chart-subtitle">Set a monthly cap per category and watch your progress.</p>
+      </div>
+      <span class="month-pill">{{ today[:7] }}</span>
+    </div>
+    <form method="post" class="budgets-form">
+      <input type="hidden" name="action" value="update_budgets" />
+      <div class="budget-list">
+        {% for row in budget_rows %}
+        <div class="budget-item budget-item-{{ row.state }}">
+          <div class="budget-item-row">
+            <span class="budget-item-name">{{ row.category }}</span>
+            <span class="budget-item-amounts">
+              <strong>{{ row.used | currency }}</strong>
+              {% if row.cap > 0 %}<span class="budget-item-of">/ {{ row.cap | currency }}</span>{% else %}<span class="budget-item-of">no cap</span>{% endif %}
+            </span>
+          </div>
+          {% if row.cap > 0 %}
+          <div class="progress-track progress-track-thin">
+            <div class="progress-fill progress-{{ row.state }}" style="width: {{ row.pct_clamped }}%"></div>
+          </div>
+          {% endif %}
+          <div class="budget-item-input">
+            <label for="budget_{{ row.category }}" class="sr-label">Cap for {{ row.category }}</label>
+            <input
+              id="budget_{{ row.category }}"
+              name="budget_{{ row.category }}"
+              type="number"
+              inputmode="decimal"
+              step="0.01"
+              min="0"
+              placeholder="Cap (leave blank for none)"
+              value="{{ row.cap if row.cap > 0 else '' }}"
+            />
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="form-action" style="margin-top: 14px;">
+        <button type="submit" class="primary-btn">Save Budgets</button>
+      </div>
+    </form>
+  </div>
+  {% endif %}
+
+  <div class="card categories-card">
+    <div class="recommend-header">
+      <div>
+        <h3>Manage Categories</h3>
+        <p class="chart-subtitle">Add, rename, or remove categories so they fit how you actually spend.</p>
+      </div>
+    </div>
+
+    <form method="post" class="cat-add-form">
+      <input type="hidden" name="action" value="add_category" />
+      <div class="cat-add-row">
+        <label for="newCategory" class="sr-label">New category name</label>
+        <input id="newCategory" name="category_name" type="text" maxlength="30" placeholder="e.g. Groceries, Rent, Tuition" required />
+        <button type="submit" class="primary-btn">Add Category</button>
+      </div>
+    </form>
+
+    <ul class="cat-list">
+      {% for cat in user_categories %}
+      <li class="cat-list-item">
+        <form method="post" class="cat-rename-form">
+          <input type="hidden" name="action" value="rename_category" />
+          <input type="hidden" name="old_name" value="{{ cat }}" />
+          <label for="rename_{{ loop.index }}" class="sr-label">Rename {{ cat }}</label>
+          <input id="rename_{{ loop.index }}" name="new_name" type="text" maxlength="30" value="{{ cat }}" />
+          <button type="submit" class="icon-btn" title="Rename">Save</button>
+        </form>
+        <form method="post" class="inline-form" onsubmit="return confirm('Remove the category {{ cat }}? Entries using it must be deleted first.');">
+          <input type="hidden" name="action" value="remove_category" />
+          <input type="hidden" name="category_name" value="{{ cat }}" />
+          <button type="submit" class="icon-btn icon-btn-danger" title="Remove">🗑</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+
+  <script>
+      (function () {
+        const ctx = document.getElementById('monthlyChart').getContext('2d');
+        const dailyByCategory = {{ daily_by_category | tojson }};
+        const categories = {{ categories | tojson }};
+        const currentMonth = '{{ current_month }}';
+        const monthlyTotal = {{ monthly_total | tojson }};
+
+        const year = parseInt(currentMonth.slice(0, 4), 10);
+        const month = parseInt(currentMonth.slice(5), 10);
+        const monthDays = new Date(year, month, 0).getDate();
+        const labels = Array.from({ length: monthDays }, (_, i) => String(i + 1).padStart(2, '0'));
+
+        // Category color palette
+        const palette = {
+          Food: '#ef4444',
+          Transport: '#3b82f6',
+          Shopping: '#a855f7',
+          School: '#10b981',
+          Other: '#f59e0b',
+        };
+        const fallbackColors = ['#0ea5e9', '#14b8a6', '#f43f5e', '#8b5cf6', '#22c55e', '#eab308'];
+        function colorFor(cat, idx) {
+          return palette[cat] || fallbackColors[idx % fallbackColors.length];
+        }
+
+        // Paint legend dots with their colors
+        categories.forEach((cat, idx) => {
+          const dot = document.querySelector(`[data-cat-dot="${CSS.escape(cat)}"]`);
+          if (dot) dot.style.background = colorFor(cat, idx);
+        });
+
+        function amountsFor(category) {
+          const map = dailyByCategory[category] || {};
+          return labels.map((day) => {
+            const key = `${currentMonth}-${day}`;
+            return map[key] || 0;
+          });
+        }
+
+        function buildDatasets(filter) {
+          if (filter === 'All') {
+            // Stacked bars per category
+            return categories.map((cat, idx) => ({
+              label: cat,
+              data: amountsFor(cat),
+              backgroundColor: colorFor(cat, idx),
+              borderColor: colorFor(cat, idx),
+              borderWidth: 0,
+              borderRadius: 6,
+              stack: 'spending',
+            }));
+          }
+          // Single category bars
+          const idx = categories.indexOf(filter);
+          const c = colorFor(filter, idx >= 0 ? idx : 0);
+          return [{
+            label: filter,
+            data: amountsFor(filter),
+            backgroundColor: c,
+            borderColor: c,
+            borderWidth: 0,
+            borderRadius: 6,
+          }];
+        }
+
+        function themeColors() {
+          const styles = getComputedStyle(document.documentElement);
+          const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+          return {
+            text: styles.getPropertyValue('--text-subtle').trim() || '#475569',
+            muted: styles.getPropertyValue('--text-muted').trim() || '#64748b',
+            grid: isDark ? 'rgba(148, 163, 184, 0.15)' : 'rgba(148, 163, 184, 0.2)',
+            tooltipBg: isDark ? 'rgba(15, 23, 42, 0.96)' : 'rgba(15, 23, 42, 0.95)',
+          };
+        }
+
+        function buildOptions() {
+          const c = themeColors();
+          return {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                backgroundColor: c.tooltipBg,
+                titleColor: '#fff',
+                bodyColor: '#e2e8f0',
+                padding: 12,
+                cornerRadius: 10,
+                callbacks: {
+                  title: (items) => `Day ${items[0].label} • ${currentMonth}`,
+                  label: (item) => ` ${item.dataset.label}: ₱${item.parsed.y.toFixed(2)}`,
+                  footer: (items) => {
+                    const total = items.reduce((sum, it) => sum + (it.parsed.y || 0), 0);
+                    return items.length > 1 ? `Day total: ₱${total.toFixed(2)}` : '';
+                  },
+                },
+              },
+            },
+            scales: {
+              x: {
+                stacked: true,
+                title: { display: true, text: 'Day of month', color: c.text, font: { weight: '600' } },
+                grid: { display: false },
+                ticks: { color: c.muted, autoSkip: false, maxRotation: 0, font: { size: 11 } },
+              },
+              y: {
+                stacked: true,
+                beginAtZero: true,
+                grid: { color: c.grid },
+                ticks: {
+                  color: c.muted,
+                  callback: (value) => '₱' + value.toFixed(0),
+                },
+                title: { display: true, text: 'Amount (₱)', color: c.text, font: { weight: '600' } },
+              },
+            },
+          };
+        }
+
+        const chart = new Chart(ctx, {
+          type: 'bar',
+          data: { labels: labels, datasets: buildDatasets('All') },
+          options: buildOptions(),
+        });
+
+        // Re-theme chart when the user toggles dark mode
+        window.addEventListener('themechange', () => {
+          chart.options = buildOptions();
+          // preserve current stacked state from the most recent options
+          const stacked = chart.options.scales.x.stacked;
+          chart.options.scales.x.stacked = stacked;
+          chart.options.scales.y.stacked = stacked;
+          chart.update();
+        });
+
+        // Filter chip handling
+        const chips = document.querySelectorAll('.filter-chip');
+        const filterLabel = document.getElementById('filterTotalLabel');
+        const filterAmount = document.getElementById('filterTotalAmount');
+        const legendItems = document.querySelectorAll('.legend-item');
+
+        chips.forEach((chip) => {
+          chip.addEventListener('click', () => {
+            chips.forEach((c) => c.classList.remove('active'));
+            chip.classList.add('active');
+            const filter = chip.dataset.filter;
+            chart.data.datasets = buildDatasets(filter);
+            const stacked = filter === 'All';
+            chart.options.scales.x.stacked = stacked;
+            chart.options.scales.y.stacked = stacked;
+            chart.update();
+
+            // Update header stats
+            if (filter === 'All') {
+              filterLabel.textContent = 'All categories';
+              filterAmount.textContent = '₱' + monthlyTotal.toFixed(2);
+            } else {
+              const catTotal = amountsFor(filter).reduce((s, v) => s + v, 0);
+              filterLabel.textContent = filter;
+              filterAmount.textContent = '₱' + catTotal.toFixed(2);
+            }
+
+            // Highlight legend
+            legendItems.forEach((item) => {
+              if (filter === 'All' || item.dataset.category === filter) {
+                item.classList.remove('legend-dim');
+              } else {
+                item.classList.add('legend-dim');
+              }
+            });
+          });
+        });
+      })();
+    </script>
+
+  <div class="card form-card">
+    <h3>Set Total Allowance</h3>
+    <p class="form-note">Updating only changes the amount — your spending history is kept.</p>
+    <form method="post" class="small-form">
+      <input type="hidden" name="action" value="update_allowance" />
+      <div class="form-grid">
+        <div>
+          <label for="allowance">Allowance amount</label>
+          <input
+            id="allowance"
+            name="allowance"
+            type="number"
+            step="0.01"
+            min="0.01"
+            value="{{ data.allowance }}"
+            required
+          />
+        </div>
+        <div class="form-action">
+          <button type="submit" class="primary-btn">Update Allowance</button>
+        </div>
+      </div>
+    </form>
+
+    <details class="danger-zone">
+      <summary>Danger zone — reset spending history</summary>
+      <p class="danger-note">This permanently deletes all logged entries. Your allowance amount is kept.</p>
+      <form method="post" class="reset-form" onsubmit="return confirm('Are you sure you want to delete ALL spending entries? This cannot be undone.');">
+        <input type="hidden" name="action" value="reset_entries" />
+        <label for="resetConfirm" class="sr-label">Type RESET to confirm</label>
+        <div class="reset-row">
+          <input id="resetConfirm" name="confirm" type="text" placeholder="Type RESET to confirm" autocomplete="off" />
+          <button type="submit" class="danger-btn">Clear History</button>
+        </div>
+      </form>
+    </details>
+  </div>
+
+  <div class="card form-card">
+    <h3>Log Allowance Use</h3>
+    <form method="post">
+      <input type="hidden" name="action" value="save_entry" />
+      <div class="form-grid">
+        <div>
+          <label for="amount">Amount Spent</label>
+          <input
+            id="amount"
+            name="amount"
+            type="number"
+            inputmode="decimal"
+            step="0.01"
+            min="0.01"
+            required
+            placeholder="5.00"
+          />
+        </div>
+        <div>
+          <label for="category">Category</label>
+          <select id="category" name="category" required>
+            {% for cat in user_categories %}
+            <option value="{{ cat }}">{{ cat }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <div>
+          <label for="location">Where Used</label>
+          <input
+            id="location"
+            name="location"
+            type="text"
+            required
+            placeholder="Store, mall, online"
+          />
+        </div>
+        <div>
+          <label for="date">Date</label>
+          <input
+            id="date"
+            name="date"
+            type="date"
+            required
+            value="{{ today }}"
+          />
+        </div>
+      </div>
+
+      <label for="description">Description</label>
+      <textarea
+        id="description"
+        name="description"
+        rows="2"
+        placeholder="Describe your expense..."
+      ></textarea>
+      <button type="submit" class="primary-btn">Save Entry</button>
+    </form>
+
+    <script>
+      const categoryLocations = {
+        'Food': ['Restaurant', 'Convenience Store', 'Grocery', 'Café', 'Food Court'],
+        'Transport': ['Taxi', 'Bus', 'Train', 'Gas Station', 'Parking'],
+        'Shopping': ['Mall', 'Department Store', 'Supermarket', 'Online', 'Market'],
+        'School': ['School', 'Bookstore', 'Library', 'Cafeteria', 'Uniform Shop'],
+        'Other': ['Store', 'Mall', 'Online', 'Gas Station', 'Other']
+      };
+
+      const categorySelect = document.getElementById('category');
+      const locationInput = document.getElementById('location');
+
+      categorySelect.addEventListener('change', function() {
+        const selectedCategory = this.value;
+        const suggestedLocations = categoryLocations[selectedCategory] || [];
+        if (suggestedLocations.length > 0) {
+          locationInput.placeholder = 'Suggested: ' + suggestedLocations.join(', ');
+          locationInput.value = suggestedLocations[0];
+        }
+      });
+
+      if (categorySelect.value) {
+        const suggestedLocations = categoryLocations[categorySelect.value] || [];
+        if (suggestedLocations.length > 0) {
+          locationInput.placeholder = 'Suggested: ' + suggestedLocations.join(', ');
+        }
+      }
+    </script>
+  </div>
+
+  <div class="card history-card">
+    <div class="history-header">
+      <h3>Allowance Transcript</h3>
+      <div class="history-header-right">
+        <span class="entry-count"
+          >{{ data.entries | length }} {{ 'entry' if data.entries | length == 1
+          else 'entries' }}</span
+        >
+        {% if data.entries %}
+        <a class="icon-btn" href="{{ url_for('export_csv') }}" title="Download all entries as CSV">⬇ CSV (all)</a>
+        <a class="icon-btn" href="{{ url_for('export_csv', month=current_month) }}" title="Download this month as CSV">⬇ CSV ({{ current_month }})</a>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="history-list">
+      {% if data.entries %} {% for entry in data.entries |
+      sort(attribute='date', reverse=True) %}
+      <div class="entry-card">
+        <div class="entry-top">
+          <strong>{{ entry.amount | currency }}</strong>
+          <span class="entry-category entry-cat-{{ entry.category | lower }}">{{ entry.category }}</span>
+        </div>
+        <div class="entry-meta">
+          <span>📅 {{ entry.date }}</span>
+          <span>📍 {{ entry.location }}</span>
+        </div>
+        <p class="entry-description">
+          {{ entry.description or 'No description provided.' }}
+        </p>
+        <div class="entry-actions">
+          <form method="post" class="inline-form" onsubmit="return confirm('Delete this entry? This cannot be undone.');">
+            <input type="hidden" name="action" value="delete_entry" />
+            <input type="hidden" name="entry_id" value="{{ entry.id }}" />
+            <button type="submit" class="icon-btn icon-btn-danger" aria-label="Delete entry" title="Delete">🗑 Delete</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %} {% else %}
+      <p class="empty-state">
+        No allowance logs yet. Add your first spending entry.
+      </p>
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+{% endblock %}

@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Allowance Tracker</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header>
+        <h1>Allowance Tracker</h1>
+        <p>Login to save and review how you spend your allowance.</p>
+      </header>
+
+      <main>
+        <section id="auth-screen" class="card">
+          <div class="auth-tabs">
+            <button id="show-login" class="active">Login</button>
+            <button id="show-signup">Sign Up</button>
+          </div>
+
+          <form id="login-form" class="auth-form">
+            <label>Email</label>
+            <input
+              type="email"
+              id="login-email"
+              placeholder="you@example.com"
+              required
+            />
+            <label>Password</label>
+            <input
+              type="password"
+              id="login-password"
+              placeholder="Password"
+              required
+            />
+            <button type="submit" class="primary-btn">Login</button>
+            <p class="note">
+              No account?
+              <button type="button" id="goto-signup" class="link-btn">
+                Create one
+              </button>
+            </p>
+          </form>
+
+          <form id="signup-form" class="auth-form hidden">
+            <label>Name</label>
+            <input
+              type="text"
+              id="signup-name"
+              placeholder="Your name"
+              required
+            />
+            <label>Email</label>
+            <input
+              type="email"
+              id="signup-email"
+              placeholder="you@example.com"
+              required
+            />
+            <label>Password</label>
+            <input
+              type="password"
+              id="signup-password"
+              placeholder="Create a password"
+              required
+            />
+            <button type="submit" class="primary-btn">Sign Up</button>
+            <p class="note">
+              Already have an account?
+              <button type="button" id="goto-login" class="link-btn">
+                Login
+              </button>
+            </p>
+          </form>
+        </section>
+
+        <section id="tracker-screen" class="hidden">
+          <div class="tracker-header">
+            <div>
+              <h2>Welcome, <span id="user-name"></span></h2>
+              <p>
+                Use the form below to log allowance spending and see how money
+                is used.
+              </p>
+            </div>
+            <button id="logout-button" class="secondary-btn">Logout</button>
+          </div>
+
+          <div class="summary-grid">
+            <div class="summary-card">
+              <span>Total allowance</span>
+              <strong id="summary-total">$0.00</strong>
+            </div>
+            <div class="summary-card">
+              <span>Spent</span>
+              <strong id="summary-spent">$0.00</strong>
+            </div>
+            <div class="summary-card">
+              <span>Remaining</span>
+              <strong id="summary-remaining">$0.00</strong>
+            </div>
+          </div>
+
+          <div class="card form-card">
+            <h3>Log Allowance Use</h3>
+            <form id="entry-form">
+              <div class="form-grid">
+                <div>
+                  <label>Amount Spent</label>
+                  <input
+                    type="number"
+                    id="entry-amount"
+                    placeholder="5.00"
+                    step="0.01"
+                    min="0.01"
+                    required
+                  />
+                </div>
+                <div>
+                  <label>Category</label>
+                  <select id="entry-category" required>
+                    <option value="Food">Food</option>
+                    <option value="Transport">Transport</option>
+                    <option value="Shopping">Shopping</option>
+                    <option value="School">School</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-grid">
+                <div>
+                  <label>Where Used</label>
+                  <input
+                    type="text"
+                    id="entry-location"
+                    placeholder="Store, mall, online"
+                    required
+                  />
+                </div>
+                <div>
+                  <label>Date</label>
+                  <input type="date" id="entry-date" required />
+                </div>
+              </div>
+              <label>Description</label>
+              <textarea
+                id="entry-description"
+                placeholder="What did you buy?"
+                rows="2"
+              ></textarea>
+              <button type="submit" class="primary-btn">Save Entry</button>
+            </form>
+          </div>
+
+          <div class="card history-card">
+            <div class="history-header">
+              <h3>Allowance Transcript</h3>
+              <span id="entry-count">0 entries</span>
+            </div>
+            <div id="history-list" class="history-list">
+              <p class="empty-state">
+                No allowance logs yet. Add your first spending entry.
+              </p>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>

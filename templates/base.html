@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Allowance Tracker</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='styles.css') }}"
+    />
+    <script>
+      // Apply saved theme BEFORE paint to avoid light/dark flicker.
+      (function () {
+        try {
+          var saved = localStorage.getItem('at-theme');
+          if (saved === 'dark' || saved === 'light') {
+            document.documentElement.setAttribute('data-theme', saved);
+          } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            document.documentElement.setAttribute('data-theme', 'dark');
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header>
+        <button
+          type="button"
+          id="themeToggle"
+          class="theme-toggle"
+          aria-label="Toggle dark mode"
+          title="Toggle dark mode"
+        >
+          <span class="theme-icon theme-icon-light">☀</span>
+          <span class="theme-icon theme-icon-dark">☾</span>
+        </button>
+        <h1>Allowance Tracker</h1>
+        <p>
+          Track spending, review allowance use, and keep a transcript of where
+          you spent your money.
+        </p>
+        {% if current_user.is_authenticated %}
+        <p>Welcome, {{ current_user.id }}! <a href="{{ url_for('logout') }}">Logout</a></p>
+        {% endif %}
+      </header>
+
+      <script>
+        // Wire up the toggle. Dispatches a 'themechange' event so any chart can refresh.
+        (function () {
+          var btn = document.getElementById('themeToggle');
+          if (!btn) return;
+          btn.addEventListener('click', function () {
+            var current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+            var next = current === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', next);
+            try { localStorage.setItem('at-theme', next); } catch (e) {}
+            window.dispatchEvent(new CustomEvent('themechange', { detail: next }));
+          });
+        })();
+      </script>
+
+      {% with messages = get_flashed_messages(with_categories=true) %} {% if
+      messages %}
+      <div class="flash-container">
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+      </div>
+      {% endif %} {% endwith %}
+
+      <main>{% block content %}{% endblock %}</main>
+    </div>
+  </body>
+</html>
